@@ -25,14 +25,15 @@ export HAMT, insert, delete
 # When `trie.data` becomes empty we could remove it from it's parent,
 # but we only know so fairly late. Maybe have a compact function?
 
-const ENTRY_COUNT = UInt(32)
-const BITMAP = UInt32
-const NBITS = sizeof(UInt) * 8
+const BITMAP = UInt
+const EMPTY_BITMAP = zero(BITMAP)
+const ENTRY_COUNT = BITMAP(32)
+const NBITS = BITMAP(sizeof(UInt) * 8)
 @assert ispow2(ENTRY_COUNT)
-const BITS_PER_LEVEL = trailing_zeros(ENTRY_COUNT)
-const LEVEL_MASK = (UInt(1) << BITS_PER_LEVEL) - 1
+const BITS_PER_LEVEL = BITMAP(trailing_zeros(ENTRY_COUNT))
+const LEVEL_MASK = BITMAP((UInt(1) << BITS_PER_LEVEL) - 1)
 # Before we rehash
-const MAX_SHIFT = (NBITS ÷ BITS_PER_LEVEL - 1) *  BITS_PER_LEVEL
+const MAX_SHIFT = BITMAP((NBITS ÷ BITS_PER_LEVEL - 1) *  BITS_PER_LEVEL)
 
 """
     HAMT{K,V}
@@ -44,12 +45,14 @@ mutable struct HAMT{K, V} <: AbstractDict{K, V}
     bitmap::BITMAP
 end
 function HAMT{K, V}() where {K, V}
-    HAMT(Vector{Union{Pair{K, V}, HAMT{K, V}}}(undef, 0), zero(UInt32))
+    HAMT(Vector{Union{Pair{K, V}, HAMT{K, V}}}(undef, 0), EMPTY_BITMAP)
 end
 
 struct BitmapIndex
     x::UInt8
 
+    init() = Tuple(new(i) for i in 0:31)
+    global const BITMAP_INDICES = init()
     function BitmapIndex(x)
         @assert 0 <= x < 32
         new(x)
@@ -61,17 +64,17 @@ Base.:(>>)(v, bi::BitmapIndex) = v >> bi.x
 
 isset(trie::HAMT, bi::BitmapIndex) = isodd(trie.bitmap >> bi)
 function set!(trie::HAMT, bi::BitmapIndex)
-    trie.bitmap |= (UInt32(1) << bi)
+    trie.bitmap |= (BITMAP(1) << bi)
     @assert count_ones(trie.bitmap) == length(trie.data)
 end
 
 function unset!(trie::HAMT, bi::BitmapIndex)
-    trie.bitmap &= ~(UInt32(1) << bi)
+    trie.bitmap &= ~(BITMAP(1) << bi)
     @assert count_ones(trie.bitmap) == length(trie.data)
 end
 
 function entry_index(trie::HAMT, bi::BitmapIndex)
-    mask = (UInt32(1) << bi.x) - UInt32(1)
+    mask = (BITMAP(1) << bi.x) - BITMAP(1)
     count_ones(trie.bitmap & mask) + 1
 end
 
@@ -84,6 +87,7 @@ end
 HashState(key)= HashState(key, hash(key), 0, 0)
 # Reconstruct
 HashState(key, depth, shift) = HashState(key, hash(key, UInt(depth ÷ BITS_PER_LEVEL)), depth, shift)
+HashState(key, hash, depth, shift) = HashState{typeof(key)}(key, UInt(hash), Int(depth), Int(shift))
 
 function next(h::HashState)
     depth = h.depth + 1
@@ -354,7 +358,7 @@ end
 
 # Base.isempty(trie::HAMT) = trie.bitmap == 0
 function Base.isempty(trie::HAMT)
-    if trie.bitmap == 0
+    if trie.bitmap === EMPTY_BITMAP
         return true
     else
         for i in 0:31

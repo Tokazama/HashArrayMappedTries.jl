@@ -109,7 +109,7 @@ Base.hash(x::PredictableHash, h::UInt) = x.x
         dict[key] = nothing
     end
     @test length(dict.data) == HashArrayMappedTries.ENTRY_COUNT
-    @test dict.bitmap == typemax(HashArrayMappedTries.BITMAP)
+    @test dict.bitmap == typemax(UInt32)
     for entry in dict.data
         @test entry isa Pair
     end
