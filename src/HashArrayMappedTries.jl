@@ -34,23 +34,18 @@ const LEVEL_MASK = (UInt(1) << BITS_PER_LEVEL) - 1
 # Before we rehash
 const MAX_SHIFT = (NBITS ÷ BITS_PER_LEVEL - 1) *  BITS_PER_LEVEL
 
-struct Leaf{K, V}
-    key::K
-    val::V
-end
-
 """
     HAMT{K,V}
 
 A HashArrayMappedTrie that optionally supports persistence.
 """
 mutable struct HAMT{K, V}
-    const data::Vector{Union{HAMT{K, V}, Leaf{K, V}}}
+    const data::Vector{Union{HAMT{K, V}, Pair{K, V}}}
     bitmap::BITMAP
 end
-HAMT{K, V}() where {K, V} = HAMT(
-    Vector{Union{Leaf{K, V}, HAMT{K, V}}}(undef, 0),
-    zero(UInt32))
+function HAMT{K, V}() where {K, V}
+    HAMT(Vector{Union{Pair{K, V}, HAMT{K, V}}}(undef, 0), zero(UInt32))
+end
 
 struct BitmapIndex
     x::UInt8
@@ -94,11 +89,11 @@ function next(h::HashState)
     depth = h.depth + 1
     shift = h.shift + BITS_PER_LEVEL
     if shift > MAX_SHIFT
-        h_hash = hash(h.key, UInt(depth ÷ BITS_PER_LEVEL))
+        h_hash = hash(getfield(h, 1), UInt(depth ÷ BITS_PER_LEVEL))
     else
         h_hash = h.hash
     end
-    return HashState(h.key, h_hash, depth, shift)
+    return HashState(getfield(h, 1), h_hash, depth, shift)
 end
 
 BitmapIndex(h::HashState) = BitmapIndex((h.hash >> h.shift) & LEVEL_MASK)
@@ -126,9 +121,9 @@ new persistent tree.
         i = entry_index(trie, bi)
         if isset(trie, bi)
             next = @inbounds trie.data[i]
-            if next isa Leaf{K,V}
+            if next isa Pair{K,V}
                 # Check if key match if not we will need to grow.
-                found = (next.key === h.key || isequal(next.key, h.key))
+                found = (getfield(next, 1) === getfield(h, 1) || isequal(getfield(next, 1), getfield(h, 1)))
                 return found, true, trie, i, bi, top, h
             end
             if copy
@@ -155,8 +150,8 @@ function Base.in(key_val::Pair{K,V}, trie::HAMT{K,V}, valcmp=(==)) where {K,V}
 
     found, present, trie, i, _, _, _ = path(trie, HashState(key))
     if found && present
-        leaf = @inbounds trie.data[i]::Leaf{K,V}
-        return valcmp(val, leaf.val) && return true
+        leaf = @inbounds trie.data[i]::Pair{K,V}
+        return valcmp(val, getfield(leaf, 2)) && return true
     end
     return false
 end
@@ -172,8 +167,8 @@ function Base.getindex(trie::HAMT{K,V}, key::K) where {K,V}
     end
     found, present, trie, i, _, _, _ = path(trie, HashState(key))
     if found && present
-        leaf = @inbounds trie.data[i]::Leaf{K,V}
-        return leaf.val
+        leaf = @inbounds trie.data[i]::Pair{K,V}
+        return getfield(leaf, 2)
     end
     throw(KeyError(key))
 end
@@ -184,8 +179,8 @@ function Base.get(trie::HAMT{K,V}, key::K, default::V) where {K,V}
     end
     found, present, trie, i, _, _, _ = path(trie, HashState(key))
     if found && present
-        leaf = @inbounds trie.data[i]::Leaf{K,V}
-        return leaf.val
+        leaf = @inbounds trie.data[i]::Pair{K,V}
+        return getfield(leaf, 2)
     end
     return default
 end
@@ -196,8 +191,8 @@ function Base.get(default::Base.Callable, trie::HAMT{K,V}, key::K) where {K,V}
     end
     found, present, trie, i, _, _, _ = path(trie, HashState(key))
     if found && present
-        leaf = @inbounds trie.data[i]::Leaf{K,V}
-        return leaf.val
+        leaf = @inbounds trie.data[i]::Pair{K,V}
+        return getfield(leaf, 2)
     end
     return default()
 end
@@ -220,8 +215,8 @@ function Base.iterate(trie::HAMT, state=nothing)
         end
         trie = state.trie.data[i]
         state = HAMTIterationState(state.parent, state.trie, i+1)
-        if trie isa Leaf
-            return (trie.key => trie.val, state)
+        if trie isa Pair
+            return (getfield(trie, 1) => getfield(trie, 2), state)
         else
             # we found a new level
             state = HAMTIterationState(state, trie, 1)
@@ -240,16 +235,16 @@ or grows the HAMT by inserting a new trie instead.
     if found # we found a slot, just set it to the new leaf
         # replace or insert
         if present # replace
-            @inbounds trie.data[i] = Leaf{K, V}(h.key, val)
+            @inbounds trie.data[i] = Pair{K, V}(getfield(h, 1), val)
         else
-            Base.insert!(trie.data, i, Leaf{K, V}(h.key, val))
+            Base.insert!(trie.data, i, Pair{K, V}(getfield(h, 1), val))
         end
         set!(trie, bi)
     else
         @assert present
         # collision -> grow
-        leaf = @inbounds trie.data[i]::Leaf{K,V}
-        leaf_h = HashState(leaf.key, h.depth, h.shift) # Reconstruct state
+        leaf = @inbounds trie.data[i]::Pair{K,V}
+        leaf_h = HashState(getfield(leaf, 1), h.depth, h.shift) # Reconstruct state
         if leaf_h.hash == h.hash
             error("Perfect hash collision detected")
         end
@@ -274,7 +269,7 @@ or grows the HAMT by inserting a new trie instead.
                 continue
             end
             i_new = entry_index(new_trie, bi_new)
-            Base.insert!(new_trie.data, i_new, Leaf{K, V}(h.key, val))
+            Base.insert!(new_trie.data, i_new, Pair{K, V}(getfield(h, 1), val))
             set!(new_trie, bi_new)
 
             i_old = entry_index(new_trie, bi_old)
@@ -348,7 +343,7 @@ function Base.length(trie::HAMT)
     for i in 0:31
         if isset(trie, BitmapIndex(i))
             item = trie.data[entry_index(trie, BitmapIndex(i))]
-            if item isa Leaf
+            if item isa Pair
                 cnt += 1
             else
                 cnt += length(item)
@@ -358,6 +353,7 @@ function Base.length(trie::HAMT)
     return cnt
 end
 
+# Base.isempty(trie::HAMT) = trie.bitmap == 0
 function Base.isempty(trie::HAMT)
     if trie.bitmap == 0
         return true

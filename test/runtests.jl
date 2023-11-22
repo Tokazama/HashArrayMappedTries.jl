@@ -111,7 +111,7 @@ Base.hash(x::PredictableHash, h::UInt) = x.x
     @test length(dict.data) == HashArrayMappedTries.ENTRY_COUNT
     @test dict.bitmap == typemax(HashArrayMappedTries.BITMAP)
     for entry in dict.data
-        @test entry isa HashArrayMappedTries.Leaf
+        @test entry isa Pair
     end
 
     dict = HAMT{PredictableHash, Nothing}()
