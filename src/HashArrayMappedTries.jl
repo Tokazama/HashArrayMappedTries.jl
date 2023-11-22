@@ -39,7 +39,7 @@ const MAX_SHIFT = (NBITS ÷ BITS_PER_LEVEL - 1) *  BITS_PER_LEVEL
 
 A HashArrayMappedTrie that optionally supports persistence.
 """
-mutable struct HAMT{K, V}
+mutable struct HAMT{K, V} <: AbstractDict{K, V}
     const data::Vector{Union{HAMT{K, V}, Pair{K, V}}}
     bitmap::BITMAP
 end

@@ -31,7 +31,7 @@ using HashArrayMappedTries
 
     dict3 = delete(dict2, 1)
     @test_throws KeyError dict3[1]
-    @test dict3 != delete(dict3, 1)
+    @test dict3 !== delete(dict3, 1)
 
     dict[1] = 3
     @test dict[1] == 3
