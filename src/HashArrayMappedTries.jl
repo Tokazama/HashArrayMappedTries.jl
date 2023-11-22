@@ -49,6 +49,7 @@ end
 
 struct BitmapIndex
     x::UInt8
+
     function BitmapIndex(x)
         @assert 0 <= x < 32
         new(x)
@@ -83,7 +84,6 @@ end
 HashState(key)= HashState(key, hash(key), 0, 0)
 # Reconstruct
 HashState(key, depth, shift) = HashState(key, hash(key, UInt(depth ÷ BITS_PER_LEVEL)), depth, shift)
-
 
 function next(h::HashState)
     depth = h.depth + 1
@@ -121,7 +121,7 @@ new persistent tree.
         i = entry_index(trie, bi)
         if isset(trie, bi)
             next = @inbounds trie.data[i]
-            if next isa Pair{K,V}
+            if next isa Pair{K, V}
                 # Check if key match if not we will need to grow.
                 found = (getfield(next, 1) === getfield(h, 1) || isequal(getfield(next, 1), getfield(h, 1)))
                 return found, true, trie, i, bi, top, h
@@ -138,8 +138,6 @@ new persistent tree.
         h = HashArrayMappedTries.next(h)
     end
 end
-
-Base.eltype(::HAMT{K,V}) where {K,V} = Pair{K,V}
 
 function Base.in(key_val::Pair{K,V}, trie::HAMT{K,V}, valcmp=(==)) where {K,V}
     if Base.isempty(trie)
@@ -168,7 +166,7 @@ function Base.getindex(trie::HAMT{K,V}, key::K) where {K,V}
     found, present, trie, i, _, _, _ = path(trie, HashState(key))
     if found && present
         leaf = @inbounds trie.data[i]::Pair{K,V}
-        return getfield(leaf, 2)
+        return leaf.second
     end
     throw(KeyError(key))
 end
@@ -216,7 +214,7 @@ function Base.iterate(trie::HAMT, state=nothing)
         trie = state.trie.data[i]
         state = HAMTIterationState(state.parent, state.trie, i+1)
         if trie isa Pair
-            return (getfield(trie, 1) => getfield(trie, 2), state)
+            return (trie, state)
         else
             # we found a new level
             state = HAMTIterationState(state, trie, 1)
@@ -227,6 +225,7 @@ function Base.iterate(trie::HAMT, state=nothing)
 end
 
 """
+    HashArrayMappedTries.insert!(found, present, trie::HAMT{K,V}, i, bi, h, val) where {K,V}
 
 Internal function that given an obtained path, either set the value
 or grows the HAMT by inserting a new trie instead.
