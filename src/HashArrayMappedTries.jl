@@ -34,9 +34,9 @@ const LEVEL_MASK = (UInt(1) << BITS_PER_LEVEL) - 1
 # Before we rehash
 const MAX_SHIFT = (NBITS ÷ BITS_PER_LEVEL - 1) *  BITS_PER_LEVEL
 
-mutable struct Leaf{K, V}
-    const key::K
-    const val::V
+struct Leaf{K, V}
+    key::K
+    val::V
 end
 
 """
@@ -78,10 +78,6 @@ function entry_index(trie::HAMT, bi::BitmapIndex)
     mask = (UInt32(1) << bi.x) - UInt32(1)
     count_ones(trie.bitmap & mask) + 1
 end
-
-# Local version
-isempty(trie::HAMT) = trie.bitmap == 0
-isempty(::Leaf) = false
 
 struct HashState{K}
     key::K
@@ -151,7 +147,7 @@ end
 Base.eltype(::HAMT{K,V}) where {K,V} = Pair{K,V}
 
 function Base.in(key_val::Pair{K,V}, trie::HAMT{K,V}, valcmp=(==)) where {K,V}
-    if isempty(trie)
+    if Base.isempty(trie)
         return false
     end
 
@@ -171,7 +167,7 @@ function Base.haskey(trie::HAMT{K}, key::K) where K
 end
 
 function Base.getindex(trie::HAMT{K,V}, key::K) where {K,V}
-    if isempty(trie)
+    if Base.isempty(trie)
         throw(KeyError(key))
     end
     found, present, trie, i, _, _, _ = path(trie, HashState(key))
@@ -183,7 +179,7 @@ function Base.getindex(trie::HAMT{K,V}, key::K) where {K,V}
 end
 
 function Base.get(trie::HAMT{K,V}, key::K, default::V) where {K,V}
-    if isempty(trie)
+    if Base.isempty(trie)
         return default
     end
     found, present, trie, i, _, _, _ = path(trie, HashState(key))
@@ -195,7 +191,7 @@ function Base.get(trie::HAMT{K,V}, key::K, default::V) where {K,V}
 end
 
 function Base.get(default::Base.Callable, trie::HAMT{K,V}, key::K) where {K,V}
-    if isempty(trie)
+    if Base.isempty(trie)
         return default
     end
     found, present, trie, i, _, _, _ = path(trie, HashState(key))
@@ -326,9 +322,9 @@ function insert(trie::HAMT{K, V}, key::K, val::V) where {K, V}
 end
 
 """
-    insert(trie::HAMT{K, V}, key::K, val::V) where {K, V})
+    delete(trie::HAMT{K, V}, key::K, val::V) where {K, V})
 
-Persitent insertion.
+Persitent deletion.
 
 ```julia
 dict = HAMT{Int, Int}()
@@ -347,15 +343,33 @@ function delete(trie::HAMT{K, V}, key::K) where {K, V}
     return top
 end
 
-Base.length(::Leaf) = 1
-Base.length(trie::HAMT) = sum((length(trie.data[entry_index(trie, BitmapIndex(i))]) for i in 0:31 if isset(trie, BitmapIndex(i))), init=0)
-
-Base.isempty(::Leaf) = false
-function Base.isempty(trie::HAMT)
-    if isempty(trie)
-        return true
+function Base.length(trie::HAMT)
+    cnt = 0
+    for i in 0:31
+        if isset(trie, BitmapIndex(i))
+            item = trie.data[entry_index(trie, BitmapIndex(i))]
+            if item isa Leaf
+                cnt += 1
+            else
+                cnt += length(item)
+            end
+        end
     end
-    return all(Base.isempty(trie.data[entry_index(trie, BitmapIndex(i))]) for i in 0:31 if isset(trie, BitmapIndex(i)))
+    return cnt
+end
+
+function Base.isempty(trie::HAMT)
+    if trie.bitmap == 0
+        return true
+    else
+        for i in 0:31
+            if isset(trie, BitmapIndex(i))
+                item = trie.data[entry_index(trie, BitmapIndex(i))]
+                (item isa HAMT && isempty(item)) || return false
+            end
+        end
+    end
+    return true
 end
 
 end # module HashArrayMapTries
